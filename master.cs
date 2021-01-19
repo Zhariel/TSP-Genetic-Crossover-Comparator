@@ -18,10 +18,10 @@ class Sqr{
 
 public static class Margin{
 	
-	public static int topMargin = 10;
-	public static int midMargin = 30;
-	public static int topSelChance = 100 - (topMargin + midMargin);
-	public static int midSelChance = midMargin;
+	public static int topDecisionRange = 60;
+	public static int midDecisionRange = 30;
+	public static int topProbability = 10;
+	public static int midProbability = 30;
 }
 
 class Specimen{
@@ -38,30 +38,28 @@ public class master : Node2D
 {
 
 
-	Label timelabel; 
-	Label generationlabel; 
+	Label timelabel, generationlabel, dist;
+	SpinBox townsfield, refreshRate, breedSpinbox, popsizeSpinbox, mutationSpinbox;
 	Godot.Timer clock;
-	Label dist; 
-	OptionButton dropdown; 
-	Button circle; 
-	Button renew; 
-	SpinBox townsfield;
-	SpinBox refreshRate;
+	OptionButton dropdown;
+	Button circle, renew, breedLabel, popsizeLabel, mutationLabel;
 	Stopwatch watch = new Stopwatch();
 	int temp;
 	int fit = 1000;
 	int popsize = 200;
-	float learningRate = 0;
-	int towns = 5;
+	float learningRate = 20;
+	int towns = 30;
 	int threshold;
 	int offX = 625;
 	int offY = 440;
 	int r = 250;
 	int displaymode = 1;
 	int generation = 0;
-	double totalCost = 0;
 	int selected = 0;
 	int timesRefreshed = 0;
+	float mutationRate = 0.3f;
+	float breedersRatio = 0.2f;
+	double totalCost = 0;
 	List<Sqr> Squares = new List<Sqr>();
 	List<Vector2> Cities;
 	Specimen topSpecimen;
@@ -95,6 +93,9 @@ public class master : Node2D
 		renew = GetNode<Button>("Renew");
 		townsfield = GetNode<SpinBox>("Townsfield");
 		refreshRate = GetNode<SpinBox>("RefreshRate");
+		popsizeSpinbox = GetNode<SpinBox>("PopsizeSpinbox");
+		mutationSpinbox = GetNode<SpinBox>("MutationSpinbox");
+		breedSpinbox = GetNode<SpinBox>("BreedSpinbox");
 		clock.Connect("timeout", this, "on_timeout");
 		circle.Text = displaymode == 0 ? "Circle" : "Shuffle";
 
@@ -116,9 +117,12 @@ public class master : Node2D
 		dropdown.AddItem("Greedy", 0);
 		dropdown.AddItem("Exemple", 1);
 		dropdown.AddItem("Exemple", 2);
+
+		mutationSpinbox.Value = mutationRate*100;
+		breedSpinbox.Value = breedersRatio*100;
+		popsizeSpinbox.Value = popsize;
 		
 		townsfield.Value = towns;
-		threshold = factorial(towns);
 		refreshRate.Value = learningRate;
 
 		init();
@@ -127,11 +131,8 @@ public class master : Node2D
 
 	async void Genetic(){
 		int threadId = timesRefreshed;
-		float breedersRatio = 0.2f;
 		int breedersCount = Mathf.FloorToInt(popsize * breedersRatio);
-		
-
-		float mutationRate = 0.1f;
+		var rng = new Random();		
 
 		List<Specimen> population = new List<Specimen>();
 
@@ -142,26 +143,35 @@ public class master : Node2D
 
 		population = population.OrderByDescending(x => x.fitness).ToList();
 		// GD.Print(SelectionTable["top"] + " " + SelectionTable["mid"] + " " + SelectionTable["low"]);
-		GD.Print("Best : " + population[0].fitness);
-		GD.Print("Worst : " + population[popsize-1].fitness);
-		GD.Print("");
+		// GD.Print("");
+		// GD.Print("Best : " + population[0].fitness);
+		// GD.Print("Worst : " + population[popsize-1].fitness);
+		// GD.Print("");
 
 		while(true){
 			generation += 1;
+			int top = popsize * Margin.topProbability / 100;
+			int mid = popsize * Margin.midProbability / 100;
+
 
 			//Selection
 			List<Specimen> breedersList = breedersSelector(population, breedersCount).OrderByDescending(x => x.fitness).ToList();
-			foreach(Specimen s in breedersList){
-				GD.Print("S : " + s.fitness);
-			}
-			GD.Print("");
-
 
 			//Crossover
+			population = Crossover(breedersList).OrderByDescending(x => x.fitness).ToList(); 
 
+			if(topSpecimen.fitness < population[0].fitness){
+				topSpecimen = population[0];
+				Update();
+			}
 
-			breedersList.OrderByDescending(x => x.fitness).ToList();
-			topSpecimen = breedersList[0];
+			//Mutation
+			for(int i = 1; i < popsize; i++){
+				float rand = Convert.ToSingle(rng.Next(0, 100))/100;
+				if(rand < mutationRate){
+					swap(population[i].genes, rng.Next(0, towns-1), rng.Next(0, towns-1));
+				}
+			}
 
 			await ToSignal(clock, "timeout");
 			if(threadId != timesRefreshed){
@@ -172,41 +182,154 @@ public class master : Node2D
 
 
 	List<Specimen> Crossover(List<Specimen> breedersList){
+
 		//Optimization
 		foreach(Specimen s in breedersList){
 			optimize(s.genes);
 			s.fitness = Math.Round(1000/cost(s.genes), 8);
-			GD.Print("T : " + s.fitness);
 		}
 
 		List<Specimen> newPop = new List<Specimen>();
+		newPop.Add(breedersList[0]);
+		var rng = new Random();
+
+		for(int i = 1; i < popsize; i++){
+			int idx1, idx2;
+			idx1 = rng.Next(0, breedersList.Count-1);
+			do{
+				idx2 = rng.Next(0, breedersList.Count-1);
+			}while(idx1 == idx2);
+			
+			List<int> individual = greedy(breedersList[idx1].genes, breedersList[idx2].genes);
+
+			newPop.Add(new Specimen(fit/cost(individual), individual));
+		}
 
 		return newPop;
 	}
 
+	List<int> greedy(List<int> s1, List<int> s2){
+
+		List<int> childPath = new List<int>();
+		var rng = new Random();
+		int startIdx = rng.Next(0, towns-1);
+
+		childPath.Add(s1[startIdx]);
+
+		for(int i = 1; i < towns; i++){
+			int curIdx1 = -1;
+			int curIdx2 = -1;
+			int cur = childPath[i-1];
+
+			for(int j = 0; j < towns; j++){
+				if(s1[j] == cur){
+					curIdx1 = j;
+				}
+			}
+			for(int j = 0; j < towns; j++){
+				if(s2[j] == childPath[i-1]){
+					curIdx2 = j;
+				}
+			}
+
+			int next1 = curIdx1 != towns-1 ? s1[curIdx1+1] : s1[0];
+			int next2 = curIdx2 != towns-1 ? s2[curIdx2+1] : s2[0];
+			int prev1 = curIdx1 != 0 ? s1[curIdx1-1] : s1[towns-1];
+			int prev2 = curIdx2 != 0 ? s2[curIdx2-1] : s2[towns-1];
+
+
+			List<int> candidates = new List<int>();
+
+			if(!childPath.Contains(next1)) candidates.Add(next1);
+			if(!childPath.Contains(next2)) candidates.Add(next2);
+			if(!childPath.Contains(prev1)) candidates.Add(prev1);
+			if(!childPath.Contains(prev2)) candidates.Add(prev2);
+
+			int smallestIdx = 0;
+			float smallestDist = 999999;
+
+			for(int k = 0; k < candidates.Count; k++){
+				float dist = pythag(Cities[candidates[k]], Cities[cur]);
+				if(dist < smallestDist){
+					smallestDist = dist;
+					smallestIdx = k;
+				}
+			}
+
+			if(candidates.Count == 0){
+				for(int k = 0; k < towns; k++){
+					if(!childPath.Contains(s1[k])){
+						childPath.Add(s1[k]);
+					}
+				}
+			}
+			else{
+				childPath.Add(candidates[smallestIdx]);
+			}
+		}
+
+		return childPath;
+	}
 
 	List<Specimen> breedersSelector(List<Specimen> previousGeneration, int breedersCount){
 		List<Specimen> breedersList = new List<Specimen>();
-		int fragment = previousGeneration.Count()/breedersCount;
+		int topRange = Margin.topDecisionRange;
+		int midRange = Margin.midDecisionRange;
+		int top = popsize * Margin.topProbability / 100;
+		int mid = popsize * Margin.midProbability / 100;
 		var rng = new Random();
-		int top = popsize * Margin.topMargin / 100;
-		int mid = popsize * Margin.midMargin / 100;
+		int topAdded = 0;
+
+		breedersCount = breedersCount < threshold ? breedersCount : threshold;
 
 		for(int i = 0; i < breedersCount; i++){
 			int rand = rng.Next(1, 100);
-			int indexToAdd = rand < Margin.topSelChance ? rng.Next(0, top)
-							: (rand >= Margin.topSelChance && rand < 100 - Margin.topMargin ? rng.Next(top, mid)
-							: rng.Next(mid, popsize));
+			int indexToAdd;
+			
+			if(topAdded == top){
+				midRange = topRange + midRange;
+				topRange = 0;
+			}
+
+			if(rand <= topRange){
+				indexToAdd = rng.Next(0, top-1);
+				topAdded++;
+			}
+			else if(rand > topRange && rand <= topRange + midRange){
+				indexToAdd = rng.Next(top, mid-1);
+			}
+			else{
+				indexToAdd = rng.Next(top + mid, popsize-1);
+			}
 
 			if(!containsSpecimen(breedersList, previousGeneration[indexToAdd])){
 				breedersList.Add(previousGeneration[indexToAdd]);
 			}
-			else if(breedersList.Count < threshold){
-				i -= 1;
+			else{
+				int yello = 0;
+				int idx = indexToAdd;
+				for(int k = indexToAdd; k >= 0; k--){
+					if(!containsSpecimen(breedersList, previousGeneration[k])){
+						yello++;
+						idx = k;
+						break;
+					}
+				}
+				int hello = 0;
+				if(idx == -1){
+					for(int p = indexToAdd; p < popsize-1; p++){
+						hello++;
+						if(!containsSpecimen(breedersList, previousGeneration[p])){
+							idx = p;
+							break;
+						}
+					}
+				}
+							
+				breedersList.Add(previousGeneration[idx]);
 			}
 		}
-
-		if(!containsSpecimen(breedersList, previousGeneration[0])){
+		if(!containsSpecimen(breedersList, previousGeneration[0])){	
 			breedersList[0] = previousGeneration[0];
 		}
 
@@ -215,7 +338,7 @@ public class master : Node2D
 	}
 
 	int factorial(int x){
-		if(x == 0) return x;
+		if(x == 1) return x;
 		else return x*factorial(x-1);
 	}
 
@@ -242,7 +365,7 @@ public class master : Node2D
 
 	Boolean containsSpecimen(List<Specimen> list, Specimen specimen){
 		foreach(Specimen s in list){
-			if(specimen.fitness == s.fitness) return true;
+			if(specimen.fitness == s.fitness){ return true;}
 		}
 		return false;
 	}
@@ -261,11 +384,11 @@ public class master : Node2D
 		Cities = new List<Vector2>();
 
 		if(circle.Text == "Circle"){
-			GenerateRangeInCircle(Squares);
+			GenerateVertexInCircle(Squares);
 		}
 		else{
 			for(int i = 0; i < towns; i++){
-				Cities.Add(GenerateRange(Squares));
+				Cities.Add(GenerateVertex(Squares));
 			}
 		}
 		
@@ -273,6 +396,7 @@ public class master : Node2D
 		topSpecimen = new Specimen(Math.Round(1000/cost(genes), 8), genes);
 
 		clock.WaitTime = Convert.ToSingle(1/refreshRate.Value);
+		threshold = towns <= 10 ? factorial(towns) : 100000;
 		watch.Restart();
 		clock.Start();
 
@@ -347,7 +471,7 @@ public class master : Node2D
 		return cost;
 	}
 
-	void GenerateRangeInCircle(List<Sqr> Squares){
+	void GenerateVertexInCircle(List<Sqr> Squares){
 		double angle = 360 / towns;
 		int x1, y1;
 
@@ -359,7 +483,7 @@ public class master : Node2D
 	}
 
 
-	Vector2 GenerateRange(List<Sqr> Squares){
+	Vector2 GenerateVertex(List<Sqr> Squares){
 		int flx = 75;
 		int ceix = 1303;
 		int fly = 93;
