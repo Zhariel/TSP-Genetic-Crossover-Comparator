@@ -2,6 +2,7 @@ using Godot;
 using System;
 using System.Linq;
 using System.Diagnostics;
+using T = System.Threading;
 using System.Collections.Generic;
 
 
@@ -39,7 +40,7 @@ public class master : Node2D
 
 
 	Label timelabel, generationlabel, dist;
-	SpinBox townsfield, refreshRate, breedSpinbox, popsizeSpinbox, mutationSpinbox;
+	SpinBox vertexfield, refreshRate, breedSpinbox, popsizeSpinbox, mutationSpinbox;
 	Godot.Timer clock;
 	OptionButton dropdown;
 	Button circle, renew, breedLabel, popsizeLabel, mutationLabel;
@@ -47,8 +48,8 @@ public class master : Node2D
 	int temp;
 	int fit = 1000;
 	int popsize = 200;
-	float learningRate = 20;
-	int towns = 30;
+	float learningRate = 1;
+	int vertex = 20;
 	int threshold;
 	int offX = 625;
 	int offY = 440;
@@ -65,19 +66,28 @@ public class master : Node2D
 	Specimen topSpecimen;
 	Color blue = new Color(0, 0, 1, 1);
 	Color red = new Color(1, 0, 0, 1);
+	Color black = new Color(0, 0, 0, 0.8f);
+	Color white = new Color(1, 1, 1, 1);
+	Color grey = new Color(0.1f, 0.1f, 0.1f, 1);
+	float linewidth = 1.3f;
+
+	public delegate List<int> DXover(List<int> s1, List<int> s2, int vertices);
+	Dictionary<String, DXover> dxionary = new Dictionary<string, DXover>();
+
 
 	public override void _Draw()
 	{
-//		foreach(Sqr Square in Squares){
-//			DrawRect(new Rect2(Square.x1, Square.y1, Square.x2 - Square.x1, Square.y2 - Square.y1), new Color(1, 0, 0, 1), false, 2, false);
-//		}
+		// foreach(Sqr Square in Squares){
+		// 	DrawRect(new Rect2(Square.x1, Square.y1, Square.x2 - Square.x1, Square.y2 - Square.y1), new Color(1, 0, 0, 1), false, 2, false);
+		// }
 
-		for(int i = 0; i < towns - 1; i++){
-			DrawLine(Cities[topSpecimen.genes[i]], Cities[topSpecimen.genes[i+1]], red);
+		for(int i = 0; i < vertex - 1; i++){
+			DrawLine(Cities[topSpecimen.genes[i]], Cities[topSpecimen.genes[i+1]], grey, linewidth);
 		}
-			DrawLine(Cities[topSpecimen.genes[topSpecimen.genes.Count-1]], Cities[topSpecimen.genes[0]], red);
+			DrawLine(Cities[topSpecimen.genes[topSpecimen.genes.Count-1]], Cities[topSpecimen.genes[0]], grey, linewidth);
 		foreach(Vector2 City in Cities){
-			DrawCircle(City, 4, blue);
+			DrawCircle(City, 5, white);
+			DrawCircle(City, 4, red);
 		}
 	}
 
@@ -91,7 +101,7 @@ public class master : Node2D
 		dropdown = GetNode<OptionButton>("Dropdown");
 		circle = GetNode<Button>("Circle");
 		renew = GetNode<Button>("Renew");
-		townsfield = GetNode<SpinBox>("Townsfield");
+		vertexfield = GetNode<SpinBox>("VertexField");
 		refreshRate = GetNode<SpinBox>("RefreshRate");
 		popsizeSpinbox = GetNode<SpinBox>("PopsizeSpinbox");
 		mutationSpinbox = GetNode<SpinBox>("MutationSpinbox");
@@ -109,20 +119,36 @@ public class master : Node2D
 		Squares.Add(new Sqr(924, 239, 990, 334));
 		Squares.Add(new Sqr(782, 337, 1090, 700));
 		Squares.Add(new Sqr(1071, 701, 1105, 773));
-		Squares.Add(new Sqr(1107, 748, 1129, 820));
+		//Squares.Add(new Sqr(1107, 748, 1129, 820));
 		Squares.Add(new Sqr(1095, 264, 1193, 511));
-		Squares.Add(new Sqr(1174, 191, 1270, 263));
-		Squares.Add(new Sqr(1268, 93, 1289, 199));
+		//Squares.Add(new Sqr(1174, 191, 1270, 263));
+		//Squares.Add(new Sqr(1268, 93, 1289, 199));
+
+		dxionary.Add("PMX", partiallyMapped);
+		dxionary.Add("Greedy", greedy);
+		dxionary.Add("OX", ordered);
+		dxionary.Add("AEX", alternatingEdges);
+		dxionary.Add("CX", greedy);
+		dxionary.Add("SCX", greedy);
+		dxionary.Add("BCSCX", greedy);
+		dxionary.Add("ASCX", greedy);
 
 		dropdown.AddItem("Greedy", 0);
-		dropdown.AddItem("Exemple", 1);
-		dropdown.AddItem("Exemple", 2);
+		dropdown.AddItem("PMX", 1);
+		dropdown.AddItem("OX", 2);
+		dropdown.AddItem("AEX", 3);
+		dropdown.AddItem("CX", 4);
+		dropdown.AddItem("SCX", 5);
+		dropdown.AddItem("BCSCX", 6);
+		dropdown.AddItem("ASCX", 7);
 
-		mutationSpinbox.Value = mutationRate*100;
-		breedSpinbox.Value = breedersRatio*100;
+		dropdown.Selected = 1;
+
+		mutationSpinbox.Value = mutationRate*10;
+		breedSpinbox.Value = breedersRatio*10;
 		popsizeSpinbox.Value = popsize;
 		
-		townsfield.Value = towns;
+		vertexfield.Value = vertex;
 		refreshRate.Value = learningRate;
 
 		init();
@@ -132,7 +158,7 @@ public class master : Node2D
 	async void Genetic(){
 		int threadId = timesRefreshed;
 		int breedersCount = Mathf.FloorToInt(popsize * breedersRatio);
-		var rng = new Random();		
+		var rng = new Random();
 
 		List<Specimen> population = new List<Specimen>();
 
@@ -153,11 +179,11 @@ public class master : Node2D
 			int top = popsize * Margin.topProbability / 100;
 			int mid = popsize * Margin.midProbability / 100;
 
-
 			//Selection
 			List<Specimen> breedersList = breedersSelector(population, breedersCount).OrderByDescending(x => x.fitness).ToList();
 
 			//Crossover
+
 			population = Crossover(breedersList).OrderByDescending(x => x.fitness).ToList(); 
 
 			if(topSpecimen.fitness < population[0].fitness){
@@ -169,7 +195,7 @@ public class master : Node2D
 			for(int i = 1; i < popsize; i++){
 				float rand = Convert.ToSingle(rng.Next(0, 100))/100;
 				if(rand < mutationRate){
-					swap(population[i].genes, rng.Next(0, towns-1), rng.Next(0, towns-1));
+					swap(population[i].genes, rng.Next(0, vertex-1), rng.Next(0, vertex-1));
 				}
 			}
 
@@ -189,53 +215,120 @@ public class master : Node2D
 			s.fitness = Math.Round(1000/cost(s.genes), 8);
 		}
 
+		DXover xover = dxionary[dropdown.Text];
+
 		List<Specimen> newPop = new List<Specimen>();
 		newPop.Add(breedersList[0]);
 		var rng = new Random();
 
-		for(int i = 1; i < popsize; i++){
+		T.Thread[] threads = new T.Thread[popsize-1];
+
+		for(int i = 0; i < popsize-1; i++){
 			int idx1, idx2;
 			idx1 = rng.Next(0, breedersList.Count-1);
 			do{
 				idx2 = rng.Next(0, breedersList.Count-1);
 			}while(idx1 == idx2);
 			
-			List<int> individual = greedy(breedersList[idx1].genes, breedersList[idx2].genes);
-
-			newPop.Add(new Specimen(fit/cost(individual), individual));
+			// threads[i] = new T.Thread(() =>{
+				List<int> individual = xover(breedersList[idx1].genes, breedersList[idx2].genes, vertex);
+				newPop.Add(new Specimen(fit/cost(individual), individual));
+			// });
+			// threads[i].Start();
 		}
+		
+		// for(int i = 0; i < popsize-1; i++){
+		// 	threads[i].Join();
+		// }
 
+		// if(newPop.Count < popsize){
+		// 	GD.Print(newPop.Count);
+		// }
+
+		// //To fix the occasional mishap
+		// while(newPop.Count < popsize){
+		// 	int idx1, idx2;
+		// 	idx1 = rng.Next(0, breedersList.Count-1);
+		// 	do{
+		// 		idx2 = rng.Next(0, breedersList.Count-1);
+		// 	}while(idx1 == idx2);
+
+		// 	List<int> individual = xover(breedersList[idx1].genes, breedersList[idx2].genes, vertex);
+		// 	newPop.Add(new Specimen(fit/cost(individual), individual));
+			
+		// }
+		
 		return newPop;
 	}
 
-	List<int> greedy(List<int> s1, List<int> s2){
+	List<int> alternatingEdges(List<int> s1, List<int> s2, int vertices){
+
+		return new List<int>();
+	}
+
+	List<int> ordered(List<int> s1, List<int> s2, int vertices){
+
+		return new List<int>();
+	}
+
+	List<int> partiallyMapped(List<int> s1, List<int> s2, int vertices){
+		int[] childPath = new int[vertices];
+		var rng = new Random();
+		sanitize(childPath, -1);
+
+		int lower = rng.Next(0, vertices-1);
+		int upper = (lower + (vertices / 2)) % vertices;
+
+		for(int i = lower; i != upper; i++, i%=vertices){
+			childPath[i] = s1[i];
+		}
+
+		for(int i = upper; i != lower; i++, i%=vertices){
+			int j = s2[i];
+			if(childPath.Contains(s2[i])){
+
+				int idxToInsert;
+				int k = s1[i];
+
+				do{
+					idxToInsert = s1.FindIndex(x => x == j);
+					j = s2[idxToInsert];
+				}while(childPath.Contains(j));
+			}
+			childPath[i] = j;
+		}
+		
+		return childPath.ToList();
+	}
+
+	List<int> greedy(List<int> s1, List<int> s2, int vertices){
 
 		List<int> childPath = new List<int>();
 		var rng = new Random();
-		int startIdx = rng.Next(0, towns-1);
+		int startIdx = rng.Next(0, vertices-1);
 
 		childPath.Add(s1[startIdx]);
 
-		for(int i = 1; i < towns; i++){
+		for(int i = 1; i < vertices; i++){
 			int curIdx1 = -1;
 			int curIdx2 = -1;
 			int cur = childPath[i-1];
 
-			for(int j = 0; j < towns; j++){
+			for(int j = 0; j < vertices; j++){
 				if(s1[j] == cur){
 					curIdx1 = j;
 				}
 			}
-			for(int j = 0; j < towns; j++){
+			for(int j = 0; j < vertices; j++){
 				if(s2[j] == childPath[i-1]){
 					curIdx2 = j;
 				}
 			}
 
-			int next1 = curIdx1 != towns-1 ? s1[curIdx1+1] : s1[0];
-			int next2 = curIdx2 != towns-1 ? s2[curIdx2+1] : s2[0];
-			int prev1 = curIdx1 != 0 ? s1[curIdx1-1] : s1[towns-1];
-			int prev2 = curIdx2 != 0 ? s2[curIdx2-1] : s2[towns-1];
+			int next1 = curIdx1 != vertices-1 ? s1[curIdx1+1] : s1[0];
+			int next2 = curIdx2 != vertices-1 ? s2[curIdx2+1] : s2[0];
+			int prev1 = curIdx1 != 0 ? s1[curIdx1-1] : s1[vertices-1];
+			int prev2 = curIdx2 != 0 ? s2[curIdx2-1] : s2[vertices-1];
 
 
 			List<int> candidates = new List<int>();
@@ -257,7 +350,7 @@ public class master : Node2D
 			}
 
 			if(candidates.Count == 0){
-				for(int k = 0; k < towns; k++){
+				for(int k = 0; k < vertices; k++){
 					if(!childPath.Contains(s1[k])){
 						childPath.Add(s1[k]);
 					}
@@ -306,19 +399,15 @@ public class master : Node2D
 				breedersList.Add(previousGeneration[indexToAdd]);
 			}
 			else{
-				int yello = 0;
 				int idx = indexToAdd;
 				for(int k = indexToAdd; k >= 0; k--){
 					if(!containsSpecimen(breedersList, previousGeneration[k])){
-						yello++;
 						idx = k;
 						break;
 					}
 				}
-				int hello = 0;
 				if(idx == -1){
 					for(int p = indexToAdd; p < popsize-1; p++){
-						hello++;
 						if(!containsSpecimen(breedersList, previousGeneration[p])){
 							idx = p;
 							break;
@@ -335,6 +424,12 @@ public class master : Node2D
 
 
 		return breedersList;
+	}
+
+	public static void sanitize(int[] array, int val){
+		for(int i = 0; i < array.Count(); i++){
+			array[i] = val;
+		}
 	}
 
 	int factorial(int x){
@@ -387,7 +482,7 @@ public class master : Node2D
 			GenerateVertexInCircle(Squares);
 		}
 		else{
-			for(int i = 0; i < towns; i++){
+			for(int i = 0; i < vertex; i++){
 				Cities.Add(GenerateVertex(Squares));
 			}
 		}
@@ -396,7 +491,7 @@ public class master : Node2D
 		topSpecimen = new Specimen(Math.Round(1000/cost(genes), 8), genes);
 
 		clock.WaitTime = Convert.ToSingle(1/refreshRate.Value);
-		threshold = towns <= 10 ? factorial(towns) : 100000;
+		threshold = vertex <= 10 ? factorial(vertex) : 100000;
 		watch.Restart();
 		clock.Start();
 
@@ -408,10 +503,7 @@ public class master : Node2D
 	}
 
 	void destroy(){
-		for(int i = towns - 1; i >= 0; i--){
-			Cities.Remove(Cities[i]);
-			//Path.Remove(Path[i]);
-		}
+		Cities.Clear();
 		topSpecimen = null;
 		timesRefreshed += 1;
 		generation = 0;
@@ -427,14 +519,17 @@ public class master : Node2D
 	void _on_Renew_pressed()
 	{
 		destroy();
-		towns = Convert.ToInt32(townsfield.Value);
+		vertex = Convert.ToInt32(vertexfield.Value);
+		breedersRatio = Convert.ToSingle(breedSpinbox.Value/10);
+		mutationRate = Convert.ToSingle(mutationSpinbox.Value/10);
+		popsize = Convert.ToInt32(popsizeSpinbox.Value);
 		init();
 		Update();
 	}
 
 	List<Int32> populate(){
 		List<Int32> lis = new List<Int32>();
-		for(int i = 0; i < towns; i++){
+		for(int i = 0; i < vertex; i++){
 			lis.Add(i);
 		}
 
@@ -466,18 +561,18 @@ public class master : Node2D
 		for(int i = 0; i < lis.Count - 1; i++){
 			cost += pythag(Cities[lis[i]], Cities[lis[i+1]]);
 		}
-			cost += pythag(Cities[lis[0]], Cities[lis[towns-1]]);
+			cost += pythag(Cities[lis[0]], Cities[lis[vertex-1]]);
 			
 		return cost;
 	}
 
 	void GenerateVertexInCircle(List<Sqr> Squares){
-		double angle = 360 / towns;
+		double angle = 360 / vertex;
 		int x1, y1;
 
-		for(int i = 0; i < towns; i++){
-			x1 = Convert.ToInt32(r * Math.Cos(i * 2 * Math.PI / towns)) + offX;
-			y1 = Convert.ToInt32(r * Math.Sin(i * 2 * Math.PI / towns)) + offY;
+		for(int i = 0; i < vertex; i++){
+			x1 = Convert.ToInt32(r * Math.Cos(i * 2 * Math.PI / vertex)) + offX;
+			y1 = Convert.ToInt32(r * Math.Sin(i * 2 * Math.PI / vertex)) + offY;
 			Cities.Add(new Vector2(x1, y1));
 		}
 	}
