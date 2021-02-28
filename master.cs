@@ -2,7 +2,7 @@ using Godot;
 using System;
 using System.Linq;
 using System.Diagnostics;
-using T = System.Threading;
+//using T = System.Threading;
 using System.Collections.Generic;
 
 
@@ -45,7 +45,8 @@ public class master : Node2D
 	OptionButton dropdown;
 	Button circle, renew, breedLabel, popsizeLabel, mutationLabel;
 	Stopwatch watch = new Stopwatch();
-	int temp;
+	Random rng = new Random();
+	int maxIter = 100000;
 	int fit = 1000;
 	int popsize = 200;
 	float learningRate = 1;
@@ -124,25 +125,25 @@ public class master : Node2D
 		//Squares.Add(new Sqr(1174, 191, 1270, 263));
 		//Squares.Add(new Sqr(1268, 93, 1289, 199));
 
-		dxionary.Add("PMX", partiallyMapped);
 		dxionary.Add("Greedy", greedy);
+		dxionary.Add("PMX", partiallyMapped);
 		dxionary.Add("OX", ordered);
 		dxionary.Add("AEX", alternatingEdges);
-		dxionary.Add("CX", greedy);
-		dxionary.Add("SCX", greedy);
-		dxionary.Add("BCSCX", greedy);
-		dxionary.Add("ASCX", greedy);
+		dxionary.Add("CX", cycle);
+		//dxionary.Add("SCX", sequentialConstructive);
+		//dxionary.Add("BCSCX", bidirectionalCircularSequentialConstructive);
+		//dxionary.Add("ASCX", adaptativeSequentialConstructive);
 
 		dropdown.AddItem("Greedy", 0);
 		dropdown.AddItem("PMX", 1);
 		dropdown.AddItem("OX", 2);
 		dropdown.AddItem("AEX", 3);
 		dropdown.AddItem("CX", 4);
-		dropdown.AddItem("SCX", 5);
-		dropdown.AddItem("BCSCX", 6);
-		dropdown.AddItem("ASCX", 7);
+		// dropdown.AddItem("SCX", 5);
+		// dropdown.AddItem("BCSCX", 6);
+		// dropdown.AddItem("ASCX", 7);
 
-		dropdown.Selected = 1;
+		dropdown.Selected = 3;
 
 		mutationSpinbox.Value = mutationRate*10;
 		breedSpinbox.Value = breedersRatio*10;
@@ -158,7 +159,6 @@ public class master : Node2D
 	async void Genetic(){
 		int threadId = timesRefreshed;
 		int breedersCount = Mathf.FloorToInt(popsize * breedersRatio);
-		var rng = new Random();
 
 		List<Specimen> population = new List<Specimen>();
 
@@ -199,6 +199,11 @@ public class master : Node2D
 				}
 			}
 
+
+			if(generation == maxIter){
+				return;
+			}
+
 			await ToSignal(clock, "timeout");
 			if(threadId != timesRefreshed){
 				break;
@@ -219,9 +224,8 @@ public class master : Node2D
 
 		List<Specimen> newPop = new List<Specimen>();
 		newPop.Add(breedersList[0]);
-		var rng = new Random();
 
-		T.Thread[] threads = new T.Thread[popsize-1];
+		//T.Thread[] threads = new T.Thread[popsize-1];
 
 		for(int i = 0; i < popsize-1; i++){
 			int idx1, idx2;
@@ -261,19 +265,90 @@ public class master : Node2D
 		return newPop;
 	}
 
+	List<int> adaptativeSequentialConstructive(List<int> s1, List<int> s2, int vertices){
+
+		List<int> childPath = new List<int>();
+
+		return childPath;
+	}
+
+	List<int> bidirectionalCircularSequentialConstructive(List<int> s1, List<int> s2, int vertices){
+
+		List<int> childPath = new List<int>();
+
+		return childPath;
+	}
+
+	List<int> sequentialConstructive(List<int> s1, List<int> s2, int vertices){
+
+		List<int> childPath = new List<int>();
+
+		return childPath;
+	}
+
+	List<int> cycle(List<int> s1, List<int> s2, int vertices){
+
+		List<int> childPath = new List<int>();
+
+		return childPath;
+	}
+
 	List<int> alternatingEdges(List<int> s1, List<int> s2, int vertices){
 
-		return new List<int>();
+		List<int> childPath = new List<int>();
+		int idx = rng.Next(0, vertices-1);
+		childPath.Add(s1[idx]);
+		idx = (idx + 1) % vertices;
+		childPath.Add(s1[idx]);		
+		String current = "s2";
+
+		while(childPath.Count != vertices){
+			List<int> currentList = current == "s1" ? s1 : s2;
+			List<int> previousList = current == "s1" ? s2 : s1;
+
+			idx = currentList.FindIndex(x => x == previousList[idx]);
+			idx = (idx + 1) % vertices;
+
+			if(!childPath.Contains(currentList[idx])){
+				childPath.Add(currentList[idx]);
+			}
+			else{
+				for(int i = 0; i < vertices; i++){
+					if(!childPath.Contains(currentList[i])){
+						childPath.Add(currentList[i]);
+					}
+				}
+			}
+			current = current == "s1" ? "s2" : "s1";
+		}
+
+		return childPath;
 	}
 
 	List<int> ordered(List<int> s1, List<int> s2, int vertices){
+		int[] childPath = new int[vertices];
 
-		return new List<int>();
+		int lower = rng.Next(0, vertices-1);
+		int upper = (lower + (vertices / 2)) % vertices;
+
+		for(int i = lower; i != upper; i++, i%=vertices){
+			childPath[i] = s1[i];
+		}
+
+		for(int i = lower, j = lower, k = upper; j < lower+vertices; i++, i%=vertices, j++){
+			int w = s2[i];
+			if(!childPath.Contains(w)){
+				childPath[k] = w;
+				k++;
+				k%=vertices;
+			}
+		}
+
+		return childPath.ToList();
 	}
 
 	List<int> partiallyMapped(List<int> s1, List<int> s2, int vertices){
 		int[] childPath = new int[vertices];
-		var rng = new Random();
 		sanitize(childPath, -1);
 
 		int lower = rng.Next(0, vertices-1);
@@ -288,7 +363,6 @@ public class master : Node2D
 			if(childPath.Contains(s2[i])){
 
 				int idxToInsert;
-				int k = s1[i];
 
 				do{
 					idxToInsert = s1.FindIndex(x => x == j);
@@ -304,7 +378,6 @@ public class master : Node2D
 	List<int> greedy(List<int> s1, List<int> s2, int vertices){
 
 		List<int> childPath = new List<int>();
-		var rng = new Random();
 		int startIdx = rng.Next(0, vertices-1);
 
 		childPath.Add(s1[startIdx]);
@@ -370,7 +443,6 @@ public class master : Node2D
 		int midRange = Margin.midDecisionRange;
 		int top = popsize * Margin.topProbability / 100;
 		int mid = popsize * Margin.midProbability / 100;
-		var rng = new Random();
 		int topAdded = 0;
 
 		breedersCount = breedersCount < threshold ? breedersCount : threshold;
@@ -538,8 +610,8 @@ public class master : Node2D
 	}
 
 	void randomize(List<Int32> lis){
-		var rng = new Random();
 		int c = lis.Count;
+		int temp;
 
 		for(int i = 0; i < c; i++){
 			int idx = rng.Next(0, c - 1);
@@ -584,7 +656,6 @@ public class master : Node2D
 		int fly = 93;
 		int ceiy = 831;
 		int x, y;
-		var rng = new Random();
 
 		while(true){
 			x = rng.Next(flx, ceix);
