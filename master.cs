@@ -38,7 +38,6 @@ class Specimen{
 public class master : Node2D
 {
 
-
 	Label timelabel, generationlabel, dist, fitnesslabel;
 	SpinBox vertexfield, refreshRate, breedSpinbox, popsizeSpinbox, mutationSpinbox, batchField, maxIterField;
 	Godot.Timer clock;
@@ -46,14 +45,16 @@ public class master : Node2D
 	Button circle, renew, breedLabel, popsizeLabel, mutationLabel, launchBatch;
 	Stopwatch watch = new Stopwatch();
 	Random rng = new Random();
-	bool batchMode = false;
+	float[,,] results;
+	bool batchMode = true;
 	bool ongoing = false;
-	int maxIter = 5;
+	int maxIter = 30;
 	int batchSize = 2;
 	int batchStack = 0;
+	int slice = 10;
 	int fit = 1000;
 	int popsize = 200;
-	float learningRate = 20;
+	float learningRate = 100;
 	int vertex = 30;
 	int threshold;
 	int offX = 625;
@@ -174,12 +175,16 @@ public class master : Node2D
 
 	void init(){
 		generateSimulation();
+		GD.Print("");
+
 		if(!batchMode){
+		GD.Print("Commencing");
 			Genetic();
 		}
 		else{
 			GD.Print("Commencing batch");
 			batchStack = dxionary.Count * batchSize - 1;
+			results = new float[dxionary.Count, batchSize, maxIter/slice+1];
 		}
 	}
 
@@ -210,9 +215,6 @@ public class master : Node2D
 		threshold = vertex <= 10 ? factorial(vertex) : 100000;
 		watch.Restart();
 		clock.Start();
-
-		GD.Print("");
-		GD.Print("Commencing");
 	}
 
 	void destroy(){
@@ -226,9 +228,8 @@ public class master : Node2D
 	async void Genetic(){
 		int breedersCount = Mathf.FloorToInt(popsize * breedersRatio);
 		int threadId = timesRefreshed;
-		ongoing = true;
+		ongoing = batchMode ? true : false;
 		generation = 0;
-		
 
 		List<Specimen> population = new List<Specimen>();
 
@@ -272,6 +273,8 @@ public class master : Node2D
 				}
 			}
 
+			addResult(topSpecimen.fitness);
+
 			if(maxIter > 0 && generation >= maxIter){
 				ongoing = false;
 				watch.Stop();
@@ -280,6 +283,16 @@ public class master : Node2D
 			
 			await ToSignal(clock, "timeout");
 		}
+	}
+
+	void addResult(double fitness){
+		if(!batchMode || !(generation == 1 || generation % slice == 0)) return;
+
+		int row = dropdown.Selected;
+		int column = Math.Abs(batchStack%batchSize);	//OOH OOH MONKEY BANANA
+		int depth = generation == 1 ? 0 : (generation-(generation%slice))/slice;
+		GD.Print("Adding - " + Math.Round(fitness, 3) + " - " + " x [" + row + "] y [" + column + "] z [" + depth + "]" + " Generation " + generation);
+		results[row, column, depth] = Convert.ToSingle(fitness);
 	}
 
 
@@ -386,7 +399,7 @@ public class master : Node2D
 		int idx = rng.Next(0, vertices-1);
 		childPath.Add(s1[idx]);
 		idx = (idx + 1) % vertices;
-		childPath.Add(s1[idx]);		
+		childPath.Add(s1[idx]);
 		String current = "s2";
 
 		while(childPath.Count != vertices){
@@ -616,16 +629,26 @@ public class master : Node2D
 			if(batchStack >= 0){
 				if(!ongoing){
 					destroy();
-					// dropdown.Selected = batchStack % dxionary.Count;
 					dropdown.Selected = (batchStack - (batchStack % batchSize)) / batchSize;
 					generateSimulation();
-					GD.Print(batchStack + " " + dropdown.Selected);
+					//GD.Print(batchStack + " " + dropdown.Selected);
 					Genetic();
 					batchStack--;
 				}
 			}
-			else{
+			else if(!ongoing){
 				batchMode = false;
+				for(int x = 0; x < dxionary.Count; x++){
+					GD.Print("Algo " + x);
+					for(int y = 0; y < batchSize; y++){
+						for(int z = 0; z < (generation-(generation%slice))/slice+1; z++){
+							GD.Print("Slice " + z);
+							GD.Print(Math.Round(results[x, y, z], 4));
+
+						}
+					}
+					GD.Print("");
+				}
 			}
 		}
 
@@ -637,7 +660,7 @@ public class master : Node2D
 		
 	}
 
-	private void _on_Circle_pressed()
+	void _on_Circle_pressed()
 	{
 		circle.Text = circle.Text == "Circle" ? "Shuffle" : "Circle";
 	}
@@ -656,10 +679,6 @@ public class master : Node2D
 		destroy();
 		init();
 		Update();
-	}
-
-	void _on_Clock_timeout(){
-		EmitSignal("timeout");
 	}
 
 	List<Int32> populate(){
