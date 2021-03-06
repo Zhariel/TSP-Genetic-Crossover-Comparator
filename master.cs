@@ -1,7 +1,6 @@
 using Godot;
 using System;
 using io = System.IO;
-using text = System.Text;
 using System.Linq;
 using System.Diagnostics;
 using C = System.Globalization.CultureInfo;
@@ -42,7 +41,7 @@ public class master : Node2D
 {
 
 	Label timelabel, generationlabel, dist, fitnesslabel;
-	SpinBox vertexfield, refreshRate, breedSpinbox, popsizeSpinbox, mutationSpinbox, batchField, maxIterField;
+	SpinBox vertexfield, refreshRate, breedSpinbox, popsizeSpinbox, mutationSpinbox, batchField, maxIterField, sliceField;
 	Godot.Timer clock;
 	OptionButton dropdown, optimizeField;
 	Button circle, renew, breedLabel, popsizeLabel, mutationLabel, launchBatch;
@@ -66,11 +65,9 @@ public class master : Node2D
 	int r = 250;
 	int displaymode = 1;
 	int generation = 0;
-	int selected = 0;
 	int timesRefreshed = 0;
 	float mutationRate = 0.3f;
 	float breedersRatio = 0.2f;
-	double totalCost = 0;
 	List<Sqr> Squares = new List<Sqr>();
 	List<Vector2> Cities;
 	Specimen topSpecimen;
@@ -116,6 +113,7 @@ public class master : Node2D
 		circle = GetNode<Button>("Circle");
 		renew = GetNode<Button>("Renew");
 		vertexfield = GetNode<SpinBox>("VertexField");
+		sliceField = GetNode<SpinBox>("SliceField");
 		batchField = GetNode<SpinBox>("BatchField");
 		maxIterField = GetNode<SpinBox>("MaxIterField");
 		refreshRate = GetNode<SpinBox>("RefreshRate");
@@ -171,6 +169,7 @@ public class master : Node2D
 		popsizeSpinbox.Value = popsize;
 		maxIterField.Value = maxIter;
 		batchField.Value = batchSize;
+		sliceField.Value = slice;
 		
 		vertexfield.Value = vertex;
 		refreshRate.Value = learningRate;
@@ -197,6 +196,7 @@ public class master : Node2D
 	void generateSimulation(){
 
 		vertex = Convert.ToInt32(vertexfield.Value);
+		learningRate = Convert.ToInt32(refreshRate.Value);
 		breedersRatio = Convert.ToSingle(breedSpinbox.Value/10);
 		mutationRate = Convert.ToSingle(mutationSpinbox.Value/10);
 		popsize = Convert.ToInt32(popsizeSpinbox.Value);
@@ -217,7 +217,7 @@ public class master : Node2D
 		List<Int32> genes = populate();
 		topSpecimen = new Specimen(Math.Round(fit/cost(genes), 8), genes);
 
-		clock.WaitTime = Convert.ToSingle(1/refreshRate.Value);
+		clock.WaitTime = Convert.ToSingle(1/learningRate);
 		threshold = vertex <= 10 ? factorial(vertex) : 100000;
 		watch.Restart();
 		clock.Start();
@@ -236,6 +236,7 @@ public class master : Node2D
 		int threadId = timesRefreshed;
 		ongoing = batchMode ? true : false;
 		generation = 0;
+		addResult(topSpecimen.fitness);
 
 		List<Specimen> population = new List<Specimen>();
 
@@ -287,17 +288,20 @@ public class master : Node2D
 				//writeResults();
 				break;
 			}
+			if(learningRate == 0){
+				watch.Stop();
+			}
 			
 			await ToSignal(clock, "timeout");
 		}
 	}
 
 	void addResult(double fitness){
-		if(!batchMode || !(generation == 1 || generation % slice == 0)) return;
+		if(!batchMode || !(generation % slice == 0)) return;
 
 		int row = dropdown.Selected;
 		int column = batchStack%batchSize < 0 ? batchSize - 1 : batchStack%batchSize;	//OOH OOH MONKEY BANANA
-		int depth = generation == 1 ? 0 : (generation-(generation%slice))/slice;
+		int depth = generation == 0 ? 0 : (generation-(generation%slice))/slice;
 		// GD.Print("Adding - " + Math.Round(fitness, 3) + " - " + " x [" + row + "] y [" + column + "] z [" + depth + "]" + " G " + generation + " S " + batchStack + " B " + batchSize);
 		results[row, column, depth] = Convert.ToSingle(fitness);
 	}
@@ -645,18 +649,17 @@ public class master : Node2D
 			}
 			else if(!ongoing){
 				batchMode = false;
-				for(int x = 0; x < algos; x++){
-					GD.Print("Algo " + x);
-					for(int y = 0; y < batchSize; y++){
-						//GD.Print("Element " + y);
-						for(int z = 0; z < maxIter/slice+1; z++){
-							// GD.Print("Slice " + z);
-							// GD.Print(Math.Round(results[x, y, z], 4) + " | " + x + y + z);
-
-						}
-					}
-					GD.Print("");
-				}
+				// for(int x = 0; x < algos; x++){
+				// 	GD.Print("Algo " + x);
+				// 	for(int y = 0; y < batchSize; y++){
+				// 		GD.Print("Batch " + y);
+				// 		for(int z = 0; z < maxIter/slice+1; z++){
+				// 			// GD.Print("Slice " + z);
+				// 			GD.Print(Math.Round(results[x, y, z], 4) + " | " + x + y + z);
+				// 		}
+				// 	}
+				// 	GD.Print("");
+				// }
 				writeResults();
 				writeParameters();
 			}
@@ -670,7 +673,7 @@ public class master : Node2D
 	}
 
 	void writeResults(){
-		string path = "out\\res.txt";
+		string path = "out\\res.csv";
 
 		try{
 			if(io.File.Exists(path)){
@@ -678,7 +681,7 @@ public class master : Node2D
 			}
 
 			string[] lines = new string[algos+1];
-			string first = "x,1";
+			string first = "0";
 
 			for(int i = 1; i < maxIter/slice+1;i++){
 				first += "," + i * slice;
@@ -686,10 +689,11 @@ public class master : Node2D
 			lines[0] = first;
 
 			for(int x = 0; x < algos; x++){
-				string line = x.ToString();
+				string line = "";
 				for(int z = 0; z < maxIter/slice+1; z++){
 					line += "," + average(x, z);
 				}
+				line = line.Remove(0,1);
 				lines[x+1] = line;
 			}
 
@@ -705,15 +709,16 @@ public class master : Node2D
 	}
 
 	void writeParameters(){
-		string path = "out\\param.txt";
+		string path = "out\\param.csv";
 		try{
 			if(io.File.Exists(path)){
 				io.File.Delete(path);
 			}
 			
+			string opti = optimizeField.Selected == 0 ? "Yes" : "No";
 			string[] lines = new string[2];
-			lines[0] = "vertices,popsize,mutation,breeders,batchsize,pathing";
-			lines[1] = vertex + "," + popsize + "," + mutationRate + "," + breedersRatio + "," + batchSize + "," + circle.Text;
+			lines[0] = "vertices,popsize,mutation,breeders,batchsize,optimize,pathing";
+			lines[1] = vertex + "," + popsize + "," + mutationRate + "," + breedersRatio + "," + batchSize + "," + opti + "," + circle.Text;
 			
 			io.File.AppendAllLines(path, lines);
 		}
