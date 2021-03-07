@@ -202,6 +202,7 @@ public class master : Node2D
 		popsize = Convert.ToInt32(popsizeSpinbox.Value);
 		maxIter = Convert.ToInt32(maxIterField.Value);
 		batchSize = Convert.ToInt32(batchField.Value);
+		slice = Convert.ToInt32(sliceField.Value);
 
 		Cities = new List<Vector2>();
 
