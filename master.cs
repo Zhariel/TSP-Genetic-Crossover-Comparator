@@ -3,9 +3,10 @@ using System;
 using io = System.IO;
 using System.Linq;
 using System.Diagnostics;
-using C = System.Globalization.CultureInfo;
-using T = System.Threading;
+using System.Threading.Tasks;
 using System.Collections.Generic;
+using C = System.Globalization.CultureInfo;
+using T = System.Threading.Thread;
 
 
 class Sqr{
@@ -44,25 +45,24 @@ public class master : Node2D
 	SpinBox vertexfield, refreshRate, breedSpinbox, popsizeSpinbox, mutationSpinbox, batchField, maxIterField, sliceField;
 	Godot.Timer clock;
 	OptionButton dropdown, optimizeField;
-	Button circle, renew, breedLabel, popsizeLabel, mutationLabel, launchBatch;
+	Button circle, renew, stop, breedLabel, popsizeLabel, mutationLabel, launchBatch;
 	Stopwatch watch = new Stopwatch();
-	Random rng = new Random();
 	float[,,] results;
 	bool batchMode = false;
 	bool ongoing = false;
 	int algos;
-	int maxIter = 60;
-	int batchSize = 2;
+	int maxIter = 10;
+	int batchSize = 1;
 	int batchStack = 0;
 	int slice = 10;
-	int fit = 1000;
+	int fit = 10000;
 	int popsize = 200;
 	float learningRate = 0;
-	int vertex = 30;
+	int vertex = 5;
 	int threshold;
 	int offX = 625;
 	int offY = 440;
-	int r = 250;
+	int radius = 250;
 	int displaymode = 1;
 	int generation = 0;
 	int timesRefreshed = 0;
@@ -77,7 +77,6 @@ public class master : Node2D
 	Color white = new Color(1, 1, 1, 1);
 	Color grey = new Color(0.1f, 0.1f, 0.1f, 1);
 	float linewidth = 1.3f;
-
 	public delegate List<int> DXover(List<int> s1, List<int> s2, int vertices);
 	Dictionary<String, DXover> dxionary = new Dictionary<string, DXover>();
 
@@ -102,7 +101,7 @@ public class master : Node2D
 
 	public override void _Ready()
 	{
-		T.Thread.CurrentThread.CurrentCulture = C.GetCultureInfo("en-US");
+		T.CurrentThread.CurrentCulture = C.GetCultureInfo("en-US");
 		timelabel = GetNode<Label>("Timelabel");
 		fitnesslabel = GetNode<Label>("FitnessLabel");
 		generationlabel = GetNode<Label>("Generationlabel");
@@ -112,6 +111,7 @@ public class master : Node2D
 		optimizeField = GetNode<OptionButton>("OptimizeField");
 		circle = GetNode<Button>("Circle");
 		renew = GetNode<Button>("Renew");
+		stop = GetNode<Button>("Stop");
 		vertexfield = GetNode<SpinBox>("VertexField");
 		sliceField = GetNode<SpinBox>("SliceField");
 		batchField = GetNode<SpinBox>("BatchField");
@@ -156,12 +156,12 @@ public class master : Node2D
 		// dropdown.AddItem("BCSCX", 6);
 		// dropdown.AddItem("ASCX", 7);
 
-		dropdown.Selected = 0;
+		dropdown.Selected = 4;
 
 		optimizeField.AddItem("Yes", 0);
 		optimizeField.AddItem("No", 1);
 
-		optimizeField.Selected = 1;
+		optimizeField.Selected = 0;
 
 		algos = dxionary.Count;
 		mutationSpinbox.Value = mutationRate*10;
@@ -240,6 +240,7 @@ public class master : Node2D
 		addResult(topSpecimen.fitness);
 
 		List<Specimen> population = new List<Specimen>();
+		Random r = new Random();
 
 		for(int i = 0; i < popsize; i++){
 			List<Int32> genes = populate();
@@ -265,8 +266,6 @@ public class master : Node2D
 			List<Specimen> breedersList = breedersSelector(population, breedersCount).OrderByDescending(x => x.fitness).ToList();
 
 			//Crossover
-
-			population.Clear();
 			population = Crossover(breedersList).OrderByDescending(x => x.fitness).ToList(); 
 
 			
@@ -275,9 +274,9 @@ public class master : Node2D
 
 			//Mutation
 			for(int i = 1; i < popsize; i++){
-				float rand = Convert.ToSingle(rng.Next(0, 100))/100;
+				float rand = Convert.ToSingle(r.Next(0, 100))/100;
 				if(rand < mutationRate){
-					swap(population[i].genes, rng.Next(0, vertex-1), rng.Next(0, vertex-1));
+					swap(population[i].genes, r.Next(0, vertex-1), r.Next(0, vertex-1));
 				}
 			}
 
@@ -307,61 +306,48 @@ public class master : Node2D
 		results[row, column, depth] = Convert.ToSingle(fitness);
 	}
 
-
 	List<Specimen> Crossover(List<Specimen> breedersList){
-
 		if(optimizeField.Selected == 0){
-			foreach(Specimen s in breedersList){
-				optimize(s.genes, 0, 1);
-				s.fitness = Math.Round(fit/cost(s.genes), 8);
+			foreach(Specimen _ in breedersList){
+				optimize(_.genes, fit, vertex, 0, 1);
+				_.fitness = Math.Round(fit/cost(_.genes), 8);
 			}
 		}
 
 		DXover xover = dxionary[dropdown.Text];
 
-		List<Specimen> newPop = new List<Specimen>();
-		newPop.Add(breedersList[0]);
+		Specimen[] newPop = new Specimen[popsize];
+		newPop[0] = breedersList[0];
 
-		//T.Thread[] threads = new T.Thread[popsize-1];
+		Parallel.For(1, popsize, _ =>{
+			Random r = new Random();
 
-		for(int i = 0; i < popsize-1; i++){
 			int idx1, idx2;
-			idx1 = rng.Next(0, breedersList.Count-1);
+			idx1 = r.Next(0, breedersList.Count-1);
 			do{
-				idx2 = rng.Next(0, breedersList.Count-1);
+				idx2 = r.Next(0, breedersList.Count-1);
 			}while(idx1 == idx2);
-			
-			// threads[i] = new T.Thread(() =>{
-				List<int> individual = xover(breedersList[idx1].genes, breedersList[idx2].genes, vertex);
-				newPop.Add(new Specimen(Math.Round(fit/cost(individual), 8), individual));
-			// });
-			// threads[i].Start();
-		}
+
+			List<int> individual = xover(breedersList[idx1].genes, breedersList[idx2].genes, vertex);
+			newPop[_] = new Specimen(Math.Round(fit/cost(individual), 8), individual);
+		});
 		
-		// for(int i = 0; i < popsize-1; i++){
-		// 	threads[i].Join();
-		// }
-
-		// if(newPop.Count < popsize){
-		// 	GD.Print(newPop.Count);
-		// }
-
-		// //To fix the occasional mishap
-		// while(newPop.Count < popsize){
-		// 	int idx1, idx2;
-		// 	idx1 = rng.Next(0, breedersList.Count-1);
-		// 	do{
-		// 		idx2 = rng.Next(0, breedersList.Count-1);
-		// 	}while(idx1 == idx2);
-
-		// 	List<int> individual = xover(breedersList[idx1].genes, breedersList[idx2].genes, vertex);
-		// 	newPop.Add(new Specimen(fit/cost(individual), individual));
-			
-		// }
-		
-		return newPop;
+		return newPop.ToList();
 	}
+	
+	void optimize(List<Int32> lis, int fitness, int vertices, int start, int step){
+		double previousFit = fitness/cost(lis);
 
+		for(int i = start, j = start; j < vertices/step; i+=step, i%=vertices-1, j++){
+			swap(lis, i, i+1);
+			if(fitness/cost(lis) < previousFit){
+				swap(lis, i, i+1);
+				continue;
+			}
+			previousFit = fitness/cost(lis);
+		}
+	}
+	
 	List<int> adaptativeSequentialConstructive(List<int> s1, List<int> s2, int vertices){
 
 		List<int> childPath = new List<int>();
@@ -407,8 +393,9 @@ public class master : Node2D
 	//I added the rest of the parent to the offspring, which at least seems to produce viable results
 	List<int> alternatingEdges(List<int> s1, List<int> s2, int vertices){
 
+		Random r = new Random();
 		List<int> childPath = new List<int>();
-		int idx = rng.Next(0, vertices-1);
+		int idx = r.Next(0, vertices-1);
 		childPath.Add(s1[idx]);
 		idx = (idx + 1) % vertices;
 		childPath.Add(s1[idx]);
@@ -438,9 +425,11 @@ public class master : Node2D
 	}
 
 	List<int> ordered(List<int> s1, List<int> s2, int vertices){
+
+		Random r = new Random();
 		int[] childPath = new int[vertices];
 
-		int lower = rng.Next(0, vertices-1);
+		int lower = r.Next(0, vertices-1);
 		int upper = (lower + (vertices / 2)) % vertices;
 
 		for(int i = lower; i != upper; i++, i%=vertices){
@@ -460,10 +449,12 @@ public class master : Node2D
 	}
 
 	List<int> partiallyMapped(List<int> s1, List<int> s2, int vertices){
+
+		Random r = new Random();
 		int[] childPath = new int[vertices];
 		sanitize(childPath, -1);
 
-		int lower = rng.Next(0, vertices-1);
+		int lower = r.Next(0, vertices-1);
 		int upper = (lower + (vertices / 2)) % vertices;
 
 		for(int i = lower; i != upper; i++, i%=vertices){
@@ -489,8 +480,9 @@ public class master : Node2D
 
 	List<int> greedy(List<int> s1, List<int> s2, int vertices){
 
+		Random r = new Random();
 		List<int> childPath = new List<int>();
-		int startIdx = rng.Next(0, vertices-1);
+		int startIdx = r.Next(0, vertices-1);
 
 		childPath.Add(s1[startIdx]);
 
@@ -504,7 +496,6 @@ public class master : Node2D
 			int next2 = curIdx2 != vertices-1 ? s2[curIdx2+1] : s2[0];
 			int prev1 = curIdx1 != 0 ? s1[curIdx1-1] : s1[vertices-1];
 			int prev2 = curIdx2 != 0 ? s2[curIdx2-1] : s2[vertices-1];
-
 
 			List<int> candidates = new List<int>();
 
@@ -525,11 +516,8 @@ public class master : Node2D
 			}
 
 			if(candidates.Count == 0){
-				for(int k = 0; k < vertices; k++){
-					if(!childPath.Contains(s1[k])){
-						childPath.Add(s1[k]);
-					}
-				}
+				int k = s1.FirstOrDefault(x => !childPath.Contains(x));
+				childPath.Add(k);
 			}
 			else{
 				childPath.Add(candidates[smallestIdx]);
@@ -541,6 +529,7 @@ public class master : Node2D
 
 	List<Specimen> breedersSelector(List<Specimen> previousGeneration, int breedersCount){
 		List<Specimen> breedersList = new List<Specimen>();
+		Random r = new Random();
 		int topRange = Margin.topDecisionRange;
 		int midRange = Margin.midDecisionRange;
 		int top = popsize * Margin.topProbability / 100;
@@ -551,7 +540,7 @@ public class master : Node2D
 		breedersList.Add(previousGeneration[0]);
 
 		for(int i = 0; i < breedersCount-1; i++){
-			int rand = rng.Next(1, 100);
+			int rand = r.Next(1, 100);
 			int indexToAdd;
 			
 			if(topAdded == top){
@@ -560,14 +549,14 @@ public class master : Node2D
 			}
 
 			if(rand <= topRange){
-				indexToAdd = rng.Next(0, top-1);
+				indexToAdd = r.Next(0, top-1);
 				topAdded++;
 			}
 			else if(rand > topRange && rand <= topRange + midRange){
-				indexToAdd = rng.Next(top, mid-1);
+				indexToAdd = r.Next(top, mid-1);
 			}
 			else{
-				indexToAdd = rng.Next(top + mid, popsize-1);
+				indexToAdd = r.Next(top + mid, popsize-1);
 			}
 
 			if(!containsSpecimen(breedersList, previousGeneration[indexToAdd])){
@@ -606,19 +595,6 @@ public class master : Node2D
 	int factorial(int x){
 		if(x == 1) return x;
 		else return x*factorial(x-1);
-	}
-
-	void optimize(List<Int32> lis, int start, int step){
-		double previousFit = fit/cost(lis);
-
-		for(int i = start, j = start; j < vertex/step; i+=step, i%=vertex-1, j++){
-			swap(lis, i, i+1);
-			if(fit/cost(lis) < previousFit){
-				swap(lis, i, i+1);
-				continue;
-			}
-			previousFit = fit/cost(lis);
-		}
 	}
 
 	void swap(List<Int32> lis, int idx1, int idx2){
@@ -760,6 +736,12 @@ public class master : Node2D
 		Update();
 	}
 
+	void _on_Stop_pressed()
+	{
+		clock.Stop();
+		watch.Stop();
+	}
+
 	List<Int32> populate(){
 		List<Int32> lis = new List<Int32>();
 		for(int i = 0; i < vertex; i++){
@@ -771,11 +753,12 @@ public class master : Node2D
 	}
 
 	void randomize(List<Int32> lis){
+		Random r = new Random();
 		int c = lis.Count;
 		int temp;
 
 		for(int i = 0; i < c; i++){
-			int idx = rng.Next(0, c - 1);
+			int idx = r.Next(0, c - 1);
 			temp = lis[i];
 			lis[i] = lis[idx];
 			lis[idx] = temp;
@@ -804,14 +787,15 @@ public class master : Node2D
 		int x1, y1;
 
 		for(int i = 0; i < vertex; i++){
-			x1 = Convert.ToInt32(r * Math.Cos(i * 2 * Math.PI / vertex)) + offX;
-			y1 = Convert.ToInt32(r * Math.Sin(i * 2 * Math.PI / vertex)) + offY;
+			x1 = Convert.ToInt32(radius * Math.Cos(i * 2 * Math.PI / vertex)) + offX;
+			y1 = Convert.ToInt32(radius * Math.Sin(i * 2 * Math.PI / vertex)) + offY;
 			Cities.Add(new Vector2(x1, y1));
 		}
 	}
 
 
 	Vector2 GenerateVertex(List<Sqr> Squares){
+		Random r = new Random();
 		int flx = 75;
 		int ceix = 1303;
 		int fly = 93;
@@ -819,7 +803,7 @@ public class master : Node2D
 		int x, y;
 
 		while(true){
-			x = rng.Next(flx, ceix);
+			x = r.Next(flx, ceix);
 
 			foreach(Sqr Square in Squares){
 				int sx1 = Square.x1;
@@ -827,7 +811,7 @@ public class master : Node2D
 
 				if(x >= sx1 && x <= sx2){
 					while(true){
-						y = rng.Next(fly, ceiy);
+						y = r.Next(fly, ceiy);
 
 						foreach(Sqr Square2 in Squares){
 							sx1 = Square2.x1;
@@ -845,10 +829,3 @@ public class master : Node2D
 		}
 	}
 }
-
-
-
-
-
-
-
